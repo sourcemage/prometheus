@@ -1,0 +1,27 @@
+#!/bin/bash
+###################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+###################################################################
+
+source /etc/pm-config
+#proper credit should go to the slocate guys for this...
+
+
+PRUNE_REGEX=$(echo "$PRUNE_PATHS $PRUNE_SORCERY $PRUNE_LOCAL" |sed -e 's,^,\\\(^,' -e 's, ,$\\\)\\\|\\\(^,g' -e 's,$,$\\\),')
+find $1 \( ! \( -type d -o -type b -o -type c -o  -type p -o -type s -o -regex $PRUNE_REGEX \) \) -exec md5sum '2>/dev/null' '{}' ';' 2>/dev/null

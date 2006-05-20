@@ -1,0 +1,21 @@
+just so we are clear here is a list of bugs i already know about:
+
+prometheus can not handle sorcery bugs well, this means that if sorcery
+hangs for whatever reason, which it does, if you run it for days on end
+like have been, prometheus is helpless to stop it.
+
+If bugzilla goes down addbug breaks miserably and gives up, someday I
+will make prometheus handle this more gracefully
+
+pm-update doesnt do cvs, but seeing as how we still mostly use p4...
+i think thats okay for now.
+
+if you ctrl-c out of prometheus somewhere the lock file sticks around
+and prometheus sees it later when you reload it. For some reason i
+have been unsuccessful at making it check for the existance of another
+pm-test process.
+
+Some would say this md5sum image stuff is a bug because it takes so
+long. However in other files I have clearly stated my opinion on this.
+Besides it works really well.
+

@@ -1,0 +1,53 @@
+What is it?
+prometheus is an automated testing suite for sourcemage
+
+Why is it?
+prometheus was written because we lack the man-power to test our
+grimoires, but we still have plenty of spare compute cycles.
+
+How does it work?
+you should read the INTERNALS file, but the quick overview is that it
+casts things, then dispels them and reports any problems it found.
+
+How do i run it:
+well you should look at the README file for that. But basically
+get into the environment you want to run it in (UML, chroot, etc.), then
+cast prometheus, then type 'pm-setup' then 'pm-test once' to get going.
+
+Its frozen at the end/begining of a cast!
+yes...this is a probem with sorcery and should be fixed soon by our
+wonderful hardworking sorcery team. In the meantime just do a 'pkill
+casting'. pm-test-cast will finish up and things will keep going.
+Eventually I will write an expect script to take care of this (and other
+problems/features). If you know expect I want to talk to you!
+
+Whats the deal with this reporting stuff?
+well its pointless to cast and dispel stuff if we dont get the information
+about it right? Well at the moment prometheus is getting support to
+email reports and/or submit them to bugzilla (cool huh?).
+
+I updated my system and prometheus got angry and reverted it.
+Yea...prometheus is _very_ good at this, you need to re-run pm-setup
+after you update stuff. Although thankfully there still should be cached
+copies of everything floating around, so you can hopefully resurrect things.
+
+The power went out on my prometheus box
+okay well you dont want to run pm-test right away because it things might
+have been left in a funny state. Look at the $PMDIR/state file to try and
+figure out where things were left off. Run the remaining commands. The
+entire list of things is
+pm-update
+pm-pre-cast
+pm-test-cast
+pm-post-cast
+pm-restore
+
+Most of them leave a record in the state file and get annoyed with you
+if its something they didnt expect. If it says for example pm-test-cast:start
+just run pm-test-cast and two subsequent scripts. After that you are
+free to keep runing pm-test. Eventually support for this will be added
+to pm-test, and you wont even have to think about it.
+
+My question isnt in here!
+email me with it! I will promptly put it in here (and answer it even,
+what a deal!).

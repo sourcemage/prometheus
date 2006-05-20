@@ -1,0 +1,54 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+source /etc/pm-config
+
+#this script cleans up the activity log
+#cleans up /usr/src
+#and saves the /var/state/sorcery/packages file
+
+
+if [ ! -e $PMDIR/currtime ]; then
+	echo "Uhm...there isnt a currtime file, oh well"
+	echo "I'll make one anyway"
+	date +%Y%m%d%H%M > $PMDIR/currtime
+fi
+TIME=$(cat $PMDIR/currtime)
+echo "pm-pre-cast:start" > $PMDIR/state
+if [ -e /var/log/sorcery/activity ]; then
+	echo "theres still an activity log"
+	cat /var/log/sorcery/activity >> /var/log/sorcery/activity.old
+fi
+echo "Making a new activity log"
+cat /dev/null > /var/log/sorcery/activity
+
+
+cd /usr/src
+echo "Clearing out broken source trees"
+ls|egrep -v "^linux"|xargs rm -rf
+echo "Clearing /tmp"
+rm -rf /tmp/*
+
+echo "saving packages list"
+cp /var/state/sorcery/packages $PMDIR
+cut -f1 -d: /var/state/sorcery/packages > $LIST_DIR/installed.lst
+
+echo "pm-pre-cast:stop" > $PMDIR/state
+exit 0

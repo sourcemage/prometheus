@@ -1,0 +1,270 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+
+source /etc/pm-config
+source /etc/sorcery/config
+
+##################################subroutines#####################
+
+#1 spell name
+source_spell(){
+    unset SOURCE_DIRECTORY
+    unset SPELL
+    unset VERSION
+    unset UPDATED
+    codex_set_current_spell_by_name $1
+}
+
+spell_to_section(){
+  section=$(egrep "^$1 " $GRIMOIRE_PATH/$CODEX_CACHE 2>/dev/null|
+            cut -f2 -d' ' 2>/dev/null|
+            xargs basename 2>/dev/null)
+  [ -z $section ] && section=Unknown
+  echo $section
+}
+
+
+#this function creates the success and failure lists
+#
+#assume that the activity log was previously truncated before
+#pm-test-cast was run, future implementations may compare with
+#a time stamp
+#
+#success.lst is defined as anything in the current activity log 
+#that had success in it at the end, and anything new in 
+#/var/state/sorcery/packages
+#
+#failure.lst is defined as anything from the activity log with 
+#failure or failed in it
+split_activity(){
+  echo "Splitting casting.lst into success and failure lists."
+  TMPFILE=/tmp/pm.tmp.$$
+
+  rm -rf $TMPFILE
+
+  egrep "^[^a-zA-Z]*[ \t]*cast" /var/log/sorcery/activity  > $TMPFILE
+
+  #failures from the activity log
+  egrep "(failure[^\w]*$)|(failed)" $TMPFILE|awk '{print $3}'| 
+  pm-exclude - $IGNORE > /tmp/tfailure.lst
+
+  #successes from the activity log
+  egrep "success[^\w]*$" $TMPFILE|awk '{print $3;}'|sort|uniq > /tmp/asuccess.lst
+
+  #successes from the packages file
+  #diff between what sorcery says is installed and the previous packages list
+  cut -f1 -d: /var/state/sorcery/packages  |
+  pm-exclude - $LIST_DIR/installed.lst > /tmp/psuccess.lst 
+
+  #combine the lists, although they should be the same
+  sort /tmp/psuccess.lst /tmp/asuccess.lst |uniq|
+  pm-exclude  - $IGNORE > $LIST_DIR/success.lst
+
+  # anything we asked to get cast that didnt get installed
+  # is a failure
+  for each in `cat $LIST_DIR/currcast.lst`; do
+    grep -q $each $LIST_DIR/success.lst || echo $each >> /tmp/tfailure.lst
+  done
+  sort /tmp/tfailure.lst|uniq > $LIST_DIR/failure.lst
+
+}
+
+#1 magic time value
+#returns snapshot directory
+snap_generic(){
+
+  local SNAPSHOT=$1
+
+  #sanity
+  if [ ! -d $SNAP_DIR ]; then
+    echo "Uhm...you'r missing a snapshot directory, oh well"
+    echo "I'll make one anyway"
+    rm -rf $SNAP_DIR
+    mkdir -p $SNAP_DIR 2>/dev/null
+  fi
+
+  (
+    mkdir -p $SNAPSHOT
+    mkdir -p $SNAPSHOT/attachment
+    mv /tmp/pm-automd5.lst $SNAPSHOT
+    cp -Rp /etc/sorcery/local/ $SNAPSHOT 
+    cp /var/state/sorcery/packages $SNAPSHOT
+    cp /var/state/sorcery/depends $SNAPSHOT
+    bzip2 -c /tmp/cast.log > $SNAPSHOT/attachment/cast.log.bz2
+    mv /tmp/cast.err $SNAPSHHOT
+  ) 2>/dev/null
+}
+
+#both snap_sucess and snap_failure need to have some of the sorcery variables
+#defined, so be sure to source /etc/sorcery/config first
+#please note: they dont use subroutines of sorcery's, just variable in that
+#particular config file
+
+#1 list path
+#2 snapshot path
+snap_success(){
+  local SNAPSHOT=$1
+  local LOG_DIR=/var/log/sorcery
+
+  for each in $(cat $LIST_DIR/success.lst); do
+    echo "Snapshotting successful cast of $each"
+
+    local SDIR=$SNAPSHOT/success/$each
+
+    mkdir -p $SDIR 2>/dev/null
+
+    mkdir $SDIR/compile 2>/dev/null
+    mkdir $SDIR/install 2>/dev/null
+    mkdir $SDIR/md5sum 2>/dev/null
+    mkdir $SDIR/cache 2>/dev/null
+
+    #this needs to be a function somehow
+    source_spell "$each"
+    if [ $SPELL != $each ]; then
+      echo "$SPELL:$each" >> $SNAPSHOT/conflicted
+    fi
+    cp $LOG_DIR/compile/$each-${VERSION}*  $SDIR/compile 2>/dev/null
+    cp $LOG_DIR/install/$each-*  $SDIR/install 2>/dev/null
+    cp $LOG_DIR/md5sum/$each-*  $SDIR/md5sum 2>/dev/null
+    cp $LOG_DIR/cache/$each-*  $SDIR/cache 2>/dev/null
+  done
+}
+
+#1 list path
+#2 snapshot dir
+snap_failure(){
+  local SNAPSHOT=$1
+  for each in $(cat $LIST_DIR/failure.lst);do
+    echo "Snapshotting failed cast of $each"
+
+    local SDIR=$SNAPSHOT/failure/$each
+
+    mkdir -p $SDIR  2>/dev/null
+    mkdir -p $SDIR/compile  2>/dev/null
+
+    source_spell "$each"
+
+    #sanity...
+    if [ $SPELL != $each ]; then
+      echo "$SPELL:$each" >> $SNAPSHOT/conflicted
+    fi
+
+    md5=$(tar c $SCRIPT_DIRECTORY 2>/dev/null | md5sum|cut -f1 -d' ')
+    #LOCK
+    echo $SPELL:$md5 >> $PROBLEMS
+    #UNLOCK
+
+    if [ ! -e $SOURCE_DIRECTORY ];then
+      echo "no build directory for $each"
+    else
+      tar -czf $SDIR/$each.tar.gz $SOURCE_DIRECTORY
+      if [ -e $SOURCE_DIRECTORY/config.log ];then
+        bzip2 -c $SOURCE_DIRECTORY/config.log > $SDIR/attachment/$each-config.log.bz2
+      fi
+
+    fi
+    cp /var/log/sorcery/compile/$each-${VERSION}* $SDIR/compile 2>/dev/null
+  done
+}
+
+check_usrlocal(){
+  echo "checking for /usr/local files"
+  #files that were there before
+  grep "/usr/local" $PMDIR/md5sum_image |awk '{print $2}' > /tmp/usrlocal.ok
+  #files that are there now
+  find /usr/local \( -type p -o -type s \) -prune -o -type d -o -print >/tmp/usrlocal.found
+  #if theres nothing in /usr/local at all, return
+  if [[ ! -s /tmp/usrlocal.found ]]; then return ; fi
+
+  #otherwise clear off whats already there from our list
+  pm-exclude /tmp/usrlocal.found /tmp/usrlocal.ok > $SNAPSHOT/usrlocal.lst
+  #if theres still something there save it all for later consumption
+  if [[ -s $SNAPSHOT/usrlocal.lst ]]; then
+    mkdir -p $SNAPSHOT/usrlocal 2>/dev/null
+    for each in $(cat $SNAPSHOT/usrlocal.lst );do
+      echo "$each should not be in /usr/local"
+      mkdir -p usrlocal/$(dirname $each) 2>/dev/null
+      cp $each $SNAPSHOT/usrlocal/
+    done
+  fi
+  rm /tmp/usrlocal.*
+}
+###########################end-subroutines#####################
+###########################begin real code#####################
+
+#override from defaults
+#sanity checks
+#FIXME make a library for this
+if ! grep -q "pm-test-cast:stop" $PMDIR/state ; then
+  echo "Uhm...are you sure you just ran pm-test-cast?"
+  if [ ! -e $LIST_DIR/currcast.lst ];then
+    echo "Geez you dont even have a currcast.lst!"
+    echo "What do you take me for?"
+    exit 1
+  fi
+  yn='n'
+  read -p "do you want to continue? y/n" -t 60 yn
+  if [[ ! $yn=='y' ]]; then
+    exit 1
+  fi
+fi
+echo "pm-post-cast:start" > $PMDIR/state
+
+
+
+if [ ! -e $PMDIR/currtime ];then
+  echo "Uhm...there isnt a currtime file, oh well"
+  echo "I'll make one anyway"
+  date +%Y%m%d%H%M > $PMDIR/currtime
+fi
+currtime=$(cat $PMDIR/currtime)
+
+#real stuff
+split_activity
+
+#new list "WINNER" list any and all spells that successfully cast at least once
+#someday a script will synthesize winner lists into a pretty listing with
+#frequencies
+touch $WINNER
+cat $LIST_DIR/success.lst >> $WINNER 
+cat $LIST_DIR/failure.lst >> $LOSER
+
+
+echo "Make snapshot of cast"
+SNAPSHOT="$SNAP_DIR/$currtime"
+snap_generic "$SNAPSHOT"
+
+#determine the component
+if [ -e $LIST_DIR/failure.lst ] ; then
+  spell_to_section $(head -1 $LIST_DIR/failure.lst)> $SNAPSHOT/component
+else
+  spell_to_section $(head -1 $LIST_DIR/currcast.lst)> $SNAPSHOT/component
+fi
+
+source /etc/sorcery/config #oh boy...but dont worry, I only want the variables
+snap_success "$SNAPSHOT"
+snap_failure "$SNAPSHOT"
+
+check_usrlocal $SNAPSHOT
+
+echo "pm-post-cast:stop" > $PMDIR/state
+exit 0
+###########################end real code########################

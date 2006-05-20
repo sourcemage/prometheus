@@ -1,0 +1,169 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+
+
+#########################borrowed/modified from sorcery ###################
+filter() {
+
+  if  [  -f  $1  ];  then
+    RID_LIST=`for  each   in  $(cat $1);   do  echo  -n  "^$each\|";     done
+              echo  -n  "/dev/null"`
+    grep  -v  "$RID_LIST"
+  else
+    cat
+  fi
+}
+
+fix_list(){
+  rm -rf /tmp/$1
+  filter $FPROTECT < $1    |
+  filter $SHARE_DIR/badfiles.lst |
+  filter /var/lib/sorcery/protected     |
+  filter /var/lib/sorcery/excluded  > /tmp/$1
+  mv /tmp/$1 .
+}
+
+##########################################################
+source /etc/pm-config || exit 10
+if ! grep -q "pm-post-cast:stop" $PMDIR/state ; then
+  echo "Uhm...are you sure you just ran pm-post-cast?"
+  if [ ! -e $LIST_DIR/success.lst ] ||
+     [ ! -e $LIST_DIR/failure.lst ];then
+    echo "Geez you dont even have a currcast.lst!"
+    echo "What do you take me for?"
+    exit 1
+  fi
+  yn='n'
+  read -p "do you want to continue? y/n" -t 60 yn
+  if [[ ! $yn=='y' ]]; then
+    exit 1
+  fi
+fi
+echo "pm-restore-cast:start" > $PMDIR/state
+
+if [ ! -e $PMDIR/currtime ];then
+        echo "Uhm...there isnt a currtime file, oh well"
+        echo "I'll make one anyway"
+        date +%Y%m%d%H%M > $PMDIR/currtime
+fi
+currtime=$(cat $PMDIR/currtime)
+
+SNAPSHOT="$SNAP_DIR/$currtime"
+
+if [ ! -d $SNAPSHOT ]; then
+  echo "Uhm...theres no snapshot directory: $SNAPSHOT"
+  echo "Oh well..."
+  rm -rf $SNAPSHOT
+  mkdir $SNAPSHOT
+fi
+
+if [ -s $LIST_DIR/success.lst ]; then
+  echo "dispelling:"
+  cat $LIST_DIR/success.lst
+  cat $LIST_DIR/success.lst|xargs dispel --notriggers |tee /tmp/dispellog.$$
+  mv /tmp/dispellog.$$ $SNAPSHOT/dispel.log
+  ldconfig
+else
+  echo "nothing to dispel!"
+fi
+
+echo "Making an md5sum image (this takes a while)"
+
+
+pm-build-md5image / > $SNAPSHOT/md5sum_image
+
+echo "Finding differences between images"
+
+cd $SNAPSHOT
+
+pm-image-diff $PMDIR/md5sum_image $SNAPSHOT/md5sum_image
+mkdir deleted diff.old diff.new new 2>/dev/null
+rm -f /tmp/badfiles.lst
+touch /tmp/badfiles.lst
+touch $SHARE_DIR/badfiles.lst
+
+old_ifs=$IFS
+IFS="
+"
+
+echo "Fixing changed files"
+if [ -s different.lst ]; then
+  rm -f diff.log
+  for each in $(cat different.lst );do
+    echo "$each was changed, restoring old and saving new"
+    mkdir -p diff.new/$(dirname $each) 2>/dev/null
+    cp $each diff.new/$each
+    mkdir -p diff.old/$(dirname $each) 2>/dev/null
+    cp $PMDIR/image/$each diff.old/$each
+    mkdir -p $(dirname $each) 2>/dev/null
+    cp $PMDIR/image/$each $each
+    ( echo --------$each--------
+      diff diff.old/$each diff.new/$each
+    ) >> diff.log
+  done
+  fix_list different.lst
+  cat different.lst >> /tmp/badfiles.lst
+fi
+
+echo "Restoring deleted files"
+if [ -s deleted.lst ]; then
+  for each in $(cat deleted.lst );do
+    echo "$each is deleted, restoring"
+    mkdir -p deleted/$(dirname $each) 2>/dev/null
+    cp $PMDIR/image/${each} deleted/$each
+    mkdir -p $(dirname $each) 2>/dev/null
+    cp $PMDIR/image/$each $each
+  done
+  fix_list deleted.lst
+  cat deleted.lst >> /tmp/badfiles.lst
+fi
+
+#this needs to happen last
+#or else bad things happen
+echo "Removing new files"
+if [ -s new.lst ]; then
+  for each in $(cat new.lst ); do 
+    echo "$each is a new file, fixing..."
+    mkdir -p $(dirname $each) 2>/dev/null
+    mv $each new
+    rdir=$(dirname $each)
+    while (rmdir $rdir 2> /dev/null); do
+      rmdir=$(dirname $rdir)
+    done
+  done
+  fix_list new.lst
+  cat new.lst >> /tmp/badfiles.lst
+fi
+IFS=$old_ifs
+
+cat $SHARE_DIR/badfiles.lst >> /tmp/badfiles.lst
+sort /tmp/badfiles.lst|uniq > $SHARE_DIR/badfiles.lst
+rm /tmp/badfiles.lst
+
+ldconfig
+
+echo "Copying lists to snapshot"
+cp -Rp $PMDIR/lists $SNAPSHOT
+echo "Saving activity log"
+mv /var/log/sorcery/activity $SNAPSHOT
+echo "adding snapshot to list of unreported snapshots"
+echo $currtime >> $PMDIR/unreported
+echo "pm-restore-cast:stop" > $PMDIR/state

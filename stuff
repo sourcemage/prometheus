@@ -1,0 +1,120 @@
+lists:
+
+ignore.lst
+	do not cast or dispel these for any reason whatsoever
+	do not modify, this is for the user to handle
+	note: deal with triggers
+	
+problems.lst
+	update in pm-post-cast
+	casts that failed, remove when there is a new version pm-update
+
+installed.lst
+	list of thigns installed during pm-pre-cast
+	update uncast.lst with it
+	use for finding out what installed during pm-test-cast in pm-post-cast
+	do not dispel anything on this list
+
+excluded.lst
+	the cat of the above three lists
+
+uncast.lst
+	things on the queue
+known.lst
+	everything that could be on the queue
+
+currcast.lst
+success.lst
+failure.lst
+
+missing.lst ???
+
+deleted.lst
+new.lst
+different.lst
+usrlocal.lst
+
+fprotect.lst files to not report a problem about even if they are
+             new/different/deleted
+
+files:
+md5sum_image
+	md5sum of every file in the 'image'
+currtime
+	magic time constant that this test will use for archival purposes
+state
+	what phase we were last in: (name of the script)
+unreported
+	snapshots that havent been reported on yet
+reported
+	log of things being reported
+
+dir-tree:
+/etc/pm-config
+/usr/doc/tinderbox/...
+/tinderbox/
+/tinderbox/state
+/tinderbox/currtime
+/tinderbox/md5sum_image
+/tinderbox/image/...
+/tinderbox/lists/...
+/tinderbox/snapshot/<time>/...
+/tinderbox/save
+/tinderbox/unreported
+
+scripts:
+
+pm-config (sh)
+	sourced by things
+
+high level:
+pm-setup 
+	build the initial environment
+
+pm-test [forever|once|grimoire|until] (sh)
+	this is a high level entry point, used by users, runs eternally
+	or once (nightly), or over an entire grimoire once
+
+	***the entire grimoire once feature has not been written yet
+
+low level:
+pm-build_md5image (sh,done)
+	make an md5sum of the system as it stands
+
+pm-update (sh,done)
+	scribe/sorcery update, rebuilds uncast.lst
+	update problems.lst
+
+pm-pre-cast (sh,done)
+	clean activity log
+	clean out /usr/src
+	make installed.lst
+
+pm-test-cast (perl,done)
+	splice off part of uncast.lst into currcast.lst
+	cast it
+
+pm-post-cast (sh,almost done)
+	partition off into success and fail lists
+	archive stuff somewhere
+	update problems.lst
+	check for /usr/local
+
+pm-image-diff (perl, done)
+	outputs missing new and different files
+
+pm-restore (sh,done)
+	dispel success.lst
+	run pm-build-md5sum on the system
+	report differences with the old image using pm-image-diff
+
+	restore files from image/remove aliens
+
+pm-report-all
+	report on everything in unreported
+
+pm-seer 
+	awesome reporting
+
+pm-exclude (perl,done)
+	take two lists and report what is on the first list but not the second

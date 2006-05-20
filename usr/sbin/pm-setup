@@ -1,0 +1,74 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+
+if [ -e /etc/pm-config ];then
+	source /etc/pm-config
+else
+	echo "no config file! incomplete install? FIXME"
+	exit 1
+fi
+echo ""
+echo "I am going to take an image of your system,"
+echo "please make sure you're system is setup how you want it"
+echo "because after this I will use it as a reference point and revert"
+echo "back to it as best as I can (and im very good at it)."
+echo ""
+echo "You can re-run this process later if you really need to change something"
+echo ""
+yn='n'
+read -p "Are you sure everything is the way you want it? y/n" yn
+if [[ $yn == 'y' ]]; then
+        echo Making the directories
+        mkdir -p $PMDIR $SNAP_DIR $PMDIR/image $LIST_DIR 2>/dev/null
+        mkdir -p $SHARE_DIR
+        mkdir -p $UNCAST_DIR
+        touch $UNCAST
+        touch $WINNER
+        touch $KNOWN
+        touch $PROBLEMS
+        touch $IGNORE
+        touch $PMDIR/state
+
+	echo Building an md5sum image of all the important files on your system
+	pm-build-md5image / | tee $PMDIR/md5sum_image
+	echo Backing up all those important files
+	echo I will do my best to keep the system looking like this, make sure
+	echo all your config files are the way you want them!
+	cut -f3 -d' ' $PMDIR/md5sum_image|sed 's/ /\\ /'|cpio -p -dmVau $PMDIR/image
+#LOCK
+	echo Making a list of spells to ignore, feel free to edit
+	echo "$IGNORE"
+	echo Under no circumstances will anything in this list be cast
+	echo or dispelled either excplicitly or implicitly
+        cp $IGNORE /tmp/ignore.lst
+	cat /var/lib/sorcery/sustained                        >> /tmp/ignore.lst
+	cut -f1 -d: /var/state/sorcery/packages               >> /tmp/ignore.lst
+        grep kernel $GRIMOIRE_PATH/$CODEX_CACHE|cut -f1 -d' ' >> /tmp/ignore.lst
+	sort /tmp/ignore.lst|uniq > $IGNORE
+	touch $FPROTECT
+        sort /usr/share/prometheus/fprotect.lst $FPROTECT|uniq > /tmp/fp.lst
+        mv /tmp/fp.lst $FPROTECT
+#UNLOCK
+	
+else
+	echo Please run pm-setup when you are actually ready
+fi
+

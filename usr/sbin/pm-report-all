@@ -1,0 +1,104 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+source /etc/pm-config || exit 1
+
+clean_old(){
+  ls $SNAP_DIR > /tmp/snaps.1
+  touch $PMDIR/unreported $PMDIR/save
+  cat $PMDIR/unreported $PMDIR/save > /tmp/snaps.save 2>/dev/null
+
+  pm-exclude /tmp/snaps.1 /tmp/snaps.save > /tmp/snaps.2
+
+  if [[ $KEEP_SNAP == "" ]]; then
+    KEEP_SNAP="1 week"
+  fi
+  let deltime=$(date -d "$KEEP_SNAP ago" +%Y%m%d%H%M)
+
+  for each in $(cat /tmp/snaps.2);do
+    let snaptime=$each
+    if (( $snaptime < $deltime ));then
+      echo "deleting snapshot: $snaptime < $deltime"
+      rm -rf $SNAP_DIR/$each
+    fi
+  done
+}
+
+#we move first to slice off any unreported snapshots
+#since this can run asynchronously with pm-test
+
+mv $PMDIR/unreported /tmp/unreported.tmp
+sort /tmp/unreported.tmp|uniq > /tmp/unreported
+touch $PMDIR/unreported
+
+
+#this is bad...FIXME!
+for each in $(cat /tmp/unreported); do
+  SNAPSHOT=$SNAP_DIR/$each
+  rm -rf $SNAPSHOT/report.*
+  echo reporting on $each in $SNAPSHOT
+  pm-seer --snapshot $each --summary --compile 200
+  if [ -s $SNAPSHOT/report.failure ]; then
+    echo "failure"
+    [[ -s $SNAPSHOT/title ]] && summary=$(cat $SNAPSHOT/title) || summary="$HOSTNAME:$each"
+    if [[ $REPORT_BUGZILLA == 'yes' && $(which addbug 2>/dev/null) ]]; then
+      echo sending $each to bugzilla
+      (
+      echo -n "bugzilla:$each:"
+      [[ -s $SNAPSHOT/component ]] && BUGCLI_COMPONENT=$(cat $SNAPSHOT/component)
+      foo=$(addbug --summary "$summary" \
+                   --description "`cat $SNAPSHOT/report.failure`"\
+                   --login "$BUGZILLA_USER"|
+           grep -e '\(Title: Bug .* Submitted\)\|\(bugid: \)\|\(error: \)')
+      bugid=$(echo $foo|perl -ne "print /([0-9]+)/")
+      [[ $bugid == "" ]] && echo $each >> /prometheus/report_mia
+      echo $bugid
+
+      [[ $(which bugattach 2>/dev/null) ]] &&
+      for file in $SNAPSHOT/attachment/* ; do
+        bar=$(bugattach --login "$BUGZILLA_USER" \
+                        --description "cast.log.bz2 for $each" \
+                        --bugid $bugid \
+                        --filename $file)
+        echo attachment:$file:$bar
+      done
+      )>> $PMDIR/reported
+    fi
+#i hate this feature and want it to go away
+    if [[ $REPORT_MAIL == 'yes'  &&
+               -x /usr/bin/mutt  && REPORT_ADDRESS != ""  ]] ; then
+      echo "sending mail"
+       cat $SNAPSHOT/report.failure |
+       mutt $REPORT_ADDRESS  -s "$summary"
+      echo "email:$each:$REPORT_ADDRESS" >> $PMDIR/reported
+    fi
+  elif [[ -s $SNAPSHOT/report.success &&
+                   $REPORT_SUCCESS == 'yes' &&
+                      $REPORT_MAIL == 'yes' &&
+                           -x /usr/bin/mutt && REPORT_ADDRESS != "" ]] ;then
+    echo "success"
+    echo "sending mail"
+    cat $SNAPSHOT/report.success |
+    mutt $REPORT_ADDRESS  -s "$each prometheus success"
+    echo "email:$each:$REPORT_ADDRESS" >> $PMDIR/reported
+  fi
+done
+rm /tmp/unreported
+clean_old

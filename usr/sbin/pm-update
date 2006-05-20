@@ -1,0 +1,97 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+
+
+#todo: make it update all the possible uncast lists
+#from UNCAST_DIR
+
+source /etc/pm-config
+if [ ! -d $PMDIR ]; then
+	rm -rf $PMDIR
+	mkdir -p $PMDIR 2>/dev/null
+fi
+if [ ! -d $LIST_DIR ]; then
+	rm -rf $LIST_DIR
+	mkdir -p $LIST_DIR 2>/dev/null
+fi
+
+#LOCK
+touch $UNCAST
+touch $KNOWN
+
+echo "pm-update:start" > $PMDIR/state
+
+#sorcery update #this may cause problems
+scribe update
+
+#i really dont like the idea of supporting this
+if [[ P4_SYNC == 'yes' && -x $(which p4) ]]; then 
+  p4 sync
+fi
+
+if [ ! -e $GRIMOIRE_PATH/$CODEX_CACHE ];then
+  echo "Uhm...where is your codex.index file?"
+  echo "are you testing the wrong grimoire?"
+  exit 1
+fi
+
+
+#LOCK
+echo finding new spells
+cut -f1 -d' ' $GRIMOIRE_PATH/$CODEX_CACHE|sort|uniq |
+pm-exclude - $IGNORE |
+pm-exclude - $KNOWN  >/tmp/newspells
+
+echo "append to uncast and known lists"
+sort $KNOWN /tmp/newspells  |uniq >/tmp/known.lst
+mv /tmp/known.lst $KNOWN
+
+sort $UNCAST /tmp/newspells |uniq >/tmp/uncast.lst
+mv /tmp/uncast.lst $UNCAST
+
+cp $PROBLEMS $PROBLEMS.backup
+. /etc/sorcery/config
+rm -rf /tmp/problems.lst
+touch /tmp/problems.lst
+for each in $(cat $PROBLEMS); do
+        spell=$(echo $each|cut -f1 -d:)
+        md5=$(echo $each|cut -f2 -d:)
+        echo "checking on $spell"
+        tmp=$(grep "^$spell " -m 1 $GRIMOIRE_PATH/$CODEX_CACHE|cut -f2 -d' ')
+	if [[ $tmp == "" ]];then
+		echo "Spell $spell not found"
+		continue
+	fi
+	SCRIPT_DIRECTORY=$tmp/$spell
+	newmd5=$(tar c $SCRIPT_DIRECTORY 2>/dev/null |md5sum|cut -f1 -d' ')
+        if [[ $md5 == $newmd5 ]]; then
+                echo "$spell hasnt changed yet"
+                echo $spell:$newmd5 >> /tmp/problems.lst
+        else
+                echo "$spell has changed removing from list"
+                echo $spell >> $LIST_DIR/removed.lst
+        fi
+done
+mv /tmp/problems.lst $PROBLEMS
+#UNLOCK
+
+echo "pm-update:stop" > $PMDIR/state
+

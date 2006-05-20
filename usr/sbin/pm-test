@@ -1,0 +1,227 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+source /etc/pm-config
+
+#initially do an update (as no recent cast failed)
+#FIXME (optionalize this)
+SKIP_UPDATE=0
+
+usage(){
+cat << EOF
+This is the front end to prometheus
+it will in one of several modes:
+
+once			run through a cast/dispel cycle once, then exit
+
+once spell		cast spell, useful for debugging, or testing just
+			one particular spell
+
+forever			run through cast/dispel cycles indefinitly or
+			until the stop file appears in the $PMDIR/stop
+
+grimoire		this is exactly like forever except it stops
+			once it has picked everything in the grimoire
+
+until time		this will continue running until <time> in the future
+			time must be something parsable by the date program
+
+section name            this will cast everything in a section, or at least
+			attempt to. (if a dependancy breaks and multiple spells
+			depend on it, none of them will get cast).
+EOF
+}
+
+check_val() {
+  if [[ $1 != 0 ]] ; then
+    echo "we have a problem,"
+    echo "please remember what messages you have recieved"
+    echo "and email astitt@sourcemage.org a bug report"
+    exit 1
+  fi
+}
+
+#here we expect to be in whatever environment is necessary for this to work
+#be it chroot, native or uml, assume all the normal stuff should work
+#we also expect that the list that our first argument is a non-empty list
+#of spells to cast
+#that list will be adjusted by the end of this function
+cast_dispel_cycle(){
+  #re-source to update dynamically
+  local UNCAST=$1
+  shift
+  source /etc/pm-config
+  if [[ $CLEAR_SPOOL == "yes" ]]; then
+    echo "Cleaning /var/spool/sorcery/* for you"
+    rm -f /var/spool/sorcery/* 2>/dev/null
+  fi
+  if [ ! -e $PMDIR/md5sum_image ]; then
+    echo "Uhm...where is your md5sum_image?"
+    echo "oh well I'll make one for you anyways, hang on."
+    pm-build-md5image / > $PMDIR/md5sum_image
+    check_val $? 
+    echo "got that taken care of..."
+  fi
+
+  currtime=$(date +%Y%m%d%H%M)
+  echo $currtime > $PMDIR/currtime
+
+  #truncate activity log
+  if [ -e /var/log/sorcery/activity ]; then
+    cat /var/log/sorcery/activity  >> /var/log/sorcery/activity.old
+    rm /var/log/sorcery/activity
+    touch /var/log/sorcery/activity
+  fi
+  if [[ $DO_UPDATES == "yes" && $SKIP_UPDATE != 1 ]]; then
+    echo "running pm-update"
+    echo "this will download new stuff"
+    #it also ensures
+    pm-update
+    check_val $? 
+  else
+    echo "skipping update"
+  fi
+  echo "running pm-pre-cast"
+  pm-pre-cast 
+  check_val $? 
+  rm -rf /tmp/pm-autocast-quit
+  echo "running pm-post-cast"
+  echo pm-test-cast -s $UNCAST $*
+  pm-test-cast -s $UNCAST $*
+  check_val $? 
+  if [[ -e /tmp/pm-autocast-quit && ! -s /tmp/pm-automd5.lst ]];then
+    echo "pm-autocast quit early"
+    echo "I think I'll stop now"
+    SKIP_UPDATE=1
+    return
+  fi
+  echo "okay got that out of the way"
+  echo "now to make the first half of the snapshot"
+  pm-post-cast
+  check_val $? 
+  echo "all right, lets restore the system back to the initial state"
+  echo "and make the second half of the snapshot"
+  echo "running pm-restore, hold on!"
+  pm-restore
+  check_val $? 
+  SKIP_UPDATE=0
+}
+
+#this actually has a way out
+#just make the $PMDIR/stop file exist
+cycle_forever(){
+  while [ ! -e $PMDIR/stop ]; do
+    if [[ ! -s $UNCAST ]]; then
+      #reload
+      cat $KNOWN > $UNCAST
+    fi
+    #FIXME (find section?)
+    cast_dispel_cycle $UNCAST
+    [[ $RUNTIME_REPORT == 'yes' ]] && pm-report-all
+  done
+  rm -f $PMDIR/stop
+}
+
+cycle_until(){
+  stop_time=$(date -d "$*" +%Y%m%d%H%M) || exit 1
+  until [[ $stop_time < $(date +%Y%m%d%H%M) || -e $PMDIR/stop ]]; do
+    if [[ ! -s $UNCAST ]]; then
+      #reload
+      cat $KNOWN > $UNCAST
+    fi
+    cast_dispel_cycle $UNCAST
+    [[ $RUNTIME_REPORT == 'yes' ]] && pm-report-all
+  done
+  rm -f $PMDIR/stop
+}
+
+#this runs through whatever UNCAST is set to until its empty
+#the list must also be non-empty (or else it will just exit
+do_list(){
+  while [ ! -e $PMDIR/stop ]; do
+    if [[ ! -s $UNCAST ]]; then
+      echo "$UNCAST is empty, thats all Im going to do for you"
+      break
+    fi
+    cast_dispel_cycle $UNCAST
+    [[ $RUNTIME_REPORT == 'yes' ]] && pm-report-all
+  done
+  rm -f $PMDIR/stop
+}
+
+#check for a section list, if there is one, make it
+#set the bugzilla component
+do_section(){
+  local section=$1
+  local component=$2
+  #adjust some globals
+  UNCAST=$UNCAST_DIR/$section
+
+  if [[ ! -s $UNCAST ]] ; then
+    echo "the $section uncast list appears to be empty, rebuilding..."
+    grep $GRIMOIRE_PATH/$section $GRIMOIRE_PATH/$CODEX_CACHE | cut -f1 -d' ' > $UNCAST
+  fi
+  echo "There are $(wc -l < $UNCAST) items to be cast"
+  do_list 
+}
+
+check_lock(){
+  if [[ -e /var/run/pm.lock ]]; then
+    echo "it looks like im already running"
+    yn='n'
+    read -p "Do you really want to keep going?" yn
+    if [ $yn != 'y' ];then
+      exit 1
+    fi
+  else
+    touch /var/run/pm.lock
+  fi
+}
+  
+#how are we running?
+case $1 in
+  once)    check_lock
+      shift
+      cast_dispel_cycle $UNCAST $*
+      ;;
+#these next two will automagically update the UNCAST list
+#which at this point cannot be
+  forever)  check_lock
+       cycle_forever
+      ;;
+  until)    check_lock
+      shift
+      cycle_until $*
+      ;;
+  grimoire)  check_lock
+      do_list
+      ;;
+  section)  check_lock
+      do_section $2
+      ;;
+  list) check_lock
+      UNCAST=$2
+      do_list
+      ;;
+  *)  usage
+      exit 1
+      ;;
+esac
+rm /var/run/pm.lock 2>/dev/null

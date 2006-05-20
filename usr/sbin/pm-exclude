@@ -1,0 +1,31 @@
+#!/usr/bin/perl
+
+########################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+############################################################
+
+#this prints everything in ARGV[0] that isnt in ARGV[1]
+#it is a convenience script for excluding certain lines from files
+#please show me a unix utility for this!
+open FD1,$ARGV[0] or die;
+open FD2,$ARGV[1] or die;
+#put everything in FD2 into a hash
+$arr2{$_}=1 for(<FD2>);
+#read everything from FD1 and if we didnt see it in FD2 print it
+map {print if $arr2{$_}!=1 } <FD1>

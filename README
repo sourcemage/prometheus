@@ -1,0 +1,63 @@
+Thank you for reading the prometheus README file.
+
+You probably want to know how to set yourself up.
+So I'll cut to the chase:
+vi /etc/prometheus/pm-config ; pm-setup && pm-test forever
+
+You may run prometheus whereever you feel like it, a chroot, in UML, or on
+a native system. The scripts assume the look and feel of a real system. So
+before you run them, chroot or do whatever you need to in order to get
+into the environment you need to be in. In other words, my scripts have
+no idea what a chroot is, nor do they care. If you want to use a chrooted
+environment chroot there first and then run the scripts (no kidding).
+
+There are two main scripts at the moment that are important:
+pm-setup
+and
+pm-test
+
+Get into your environment, whatever that means, and run pm-setup. This
+will image the system and put things in place. Try to make sure the system
+is in the state you want it to be in before you run pm-setup, repeatedly
+running it shouldnt hurt anything, i recommend clearing out the
+PMDIR/lists directory before you try this, or at least running pm-update
+again if the DO_UPDATES variable is set to 'no'. That way you wont end
+up with excluded spells on the casting list...
+
+
+After that finishes you should edit /etc/prometheus/pm-config
+this is where you get to override anything in /etc/pm-config
+IF YOU WANT TO SEND REPORTS TO BUGZILLA YOU MUST PUT YOUR LOGIN AND
+PASSWORD HERE. There is no default prometheus account, you have to have
+your own, this is so we can track bugs down to a user if we need to.
+
+
+Once the configuration is set how you want it you are ready to go.
+
+pm-test harnesses all the other scripts and makes this whole things
+work. You can give it the argument 'once', 'forever', or 'until'. These
+are all pretty self explainitory. Once will run through the cycle
+once. forever will run forever, and until takes a time after it, which
+must be parsable by the date program. prometheus will not start another
+cycle after that time. You can also stop the forever or until modes by
+touching the file $PMDIR/stop, that will stop prometheus after the
+current cycle finishes. Ctrl-C'ing out of prometheus is normally not a
+good idea and can cause the next bug report to have extra information
+in it from the previous pm-test run.
+
+Now you are probably thinking that you want to use the tinderbox
+overnight, well the easy solution is to run pm-test forever as a cron job,
+then at some later time touch the stop file. Or
+
+	pm-test until 6:00 am tomorrow
+
+Reporting can be run at runtime after each cycle by turning on the
+RUNTIME_REPORT variable (set it to 'yes').  Or you can run pm-report-all
+at some other time.
+
+Right now pm-seer (written by Duane Malcom) is being developed. There
+is also the old crappy pm-make-report script that I wrote in 30 seconds
+as a proof of concept.
+
+I think thats just about it.
+email me with questions or read the FAQ

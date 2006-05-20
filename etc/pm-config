@@ -1,0 +1,126 @@
+#for the sake of simplicity
+#please override these defaults in /etc/prometheus/pm-config
+#thank you
+
+if [ -e /etc/prometheus/pm-config ];then
+	source /etc/prometheus/pm-config
+fi
+        PMDIR=${PMDIR:=/prometheus}
+
+     SNAP_DIR=${SNAP_DIR:=${PMDIR}/snapshot}
+
+     #the location of all local lists
+     LIST_DIR=${LIST_DIR:=${PMDIR}/lists}
+     #the location of all shared lists (ie over nfs)
+     #problems, known and ignore may live safely here
+     #when locking is in place, this is a pre-emptive re-arrange
+     SHARE_DIR=${SHARE_DIR:=${LIST_DIR}/share}
+
+     #all lists of uncasts things (grimoires, sections, etc)
+     #live here, this directory by default is under the shared directory
+     #so that it too may be shared
+     UNCAST_DIR=${UNCAST_DIR:=${SHARE_DIR}/uncast/}
+
+     #if one really wants this can be shared...
+     FPROTECT=${FPROTECT:=${LIST_DIR}/fprotect.lst}
+
+     #this also can be shared if you really want (ie in a ubiquitous cluster)
+     WINNER=${WINNER:=${LIST_DIR}/winner.lst}
+     LOSER=${LOSER:=${LIST_DIR}/loser.lst}
+
+     #change these if you want to not share individual ones, etc.
+
+     #default uncast list
+     UNCAST=${UNCAST:=${UNCAST_DIR}/grimoire}
+
+     #other random stuff that is sharing safe (someday)
+     KNOWN=${KNOWN:=${SHARE_DIR}/known.lst}
+     PROBLEMS=${PROBLEMS:=${SHARE_DIR}/problems.lst}
+     IGNORE=${IGNORE:=${SHARE_DIR}/ignore.lst}
+
+
+      GRIMOIRE=${GRIMOIRE:=test}
+ GRIMOIRE_PATH=/var/lib/sorcery/codex/${GRIMOIRE}
+   CODEX_CACHE=${CODEX_CACHE:=codex.index}
+
+#how long to keep stale snapshots for
+     KEEP_SNAP=${KEEP_SNAP:='2 weeks'}
+ 
+#how many to cast each cycle, normally 1
+      NUM_CAST=${NUM_CAST:=1}
+
+    DO_UPDATES=${DO_UPDATES:=no}
+
+#force an update no matter what just happened (cast exited early because
+#pm-autocast decided it didnt like the depends list for whatever was chosen
+#normally its good to say no here because otherwise you'll spend all day
+#updating otherwise. But if you really really want to, its here.
+#this has no meaning if DO_UPDATES is set to no
+ FORCE_UPDATES=${FORCE_UPDATES:=no}
+
+#clean out everything in /var/spool/sorcery
+#after a cast/dispel cycle. Useful for machines with low 
+#hard drive space
+    CLEAR_SPOOL=${CLEAR_SPOOL:=no}
+
+#please make sure whatever variables you need to set for p4 are set in
+#/etc/prometheus/pm-config
+       P4_SYNC=${P4_SYNC:=no}
+
+#turn this to no if you want prometheus to answer questions about optional
+#depends and configuration questions in a random manner instead of doing
+#the default
+    DO_DEFAULTS=${DO_DEFAULTS:=yes}
+
+#If this is yes pm-test will run pm-report-snap after each run
+#if not you must run it by other means
+#in either case it will do all unreported snapshots
+RUNTIME_REPORT=${RUNTIME_REPORT:=yes}
+
+
+#places prometheus wont touch
+PRUNE_PATHS=".*sorcery.* /boot/.* /dev/.* /devices/.* /root/.* /home/.* /proc/.* /sys/.* /tmp/.* /mnt/.* $PMDIR/.* /etc/prometheus/.* /usr/src/.* /etc/pm-config /var/log/.* /etc/ld.so.cache /var/run/.* /var/spool/mail/.* /var/cache/compiler/.* /usr/man/.* /usr/share/prometheus/.* /lib/modules/.* /usr/sbin/pm-.*"
+
+#sorcery files in /usr/sbin/...
+PRUNE_SORCERY="/usr/sbin/cast /usr/sbin/gaze /usr/sbin/dispel /usr/sbin/scribe /usr/sbin/summon /usr/sbin/scribbler"
+
+#adjust this (in the local config file) for any local issues you may have
+#with protecting files
+PRUNE_LOCAL=${PRUNE_LOCAL:=""}
+
+#send a report to bugzilla
+
+REPORT_BUGZILLA=${REPORT_BUGZILLA:=no}
+
+#email report somewhere
+
+REPORT_MAIL=${REPORT_MAIL:=yes}
+REPORT_ADDRESS=${REPORT_ADDRESS:="root@localhost"}
+
+#email success reports too (lets you know its working)
+#this will not send things to bugzilla
+#no success report will (should) ever be sent to bugzilla,
+#since its not a bug!
+REPORT_SUCCESS=${REPORT_SUCCESS:=yes}
+
+
+
+#BUGCLI STUFF:
+#you need a bugzilla account
+#PLEASE OVVERIDE THESE
+          BUGZILLA_USER=${BUGZILLA_USER:="j@random.net"}
+ export BUGCLI_PASSWORD=${BUGCLI_PASSWORD:="wrong_passwd"}
+
+#tailor the following as needed
+  export BUGCLI_PRODUCT=${BUGCLI_PRODUCT:="Prometheus"}
+#in pm-test section this can be changed to the section name
+export BUGCLI_COMPONENT=${BUGCLI_COMPONENT:="Unknown"}
+#override this
+  export BUGCLI_VERSION=${BUGCLI_VERSION:="test grimoire"}
+ export BUGCLI_PRIORITY=${BUGCLI_PRIORITY:="P2"}
+ export BUGCLI_PLATFORM=${BUGCLI_PLATFORM:="x86"}
+       export BUGCLI_OS=${BUGCLI_OS:="Linux"}
+ export BUGCLI_SEVERITY=${BUGCLI_SEVERITY:="normal"}
+   export BUGCLI_SERVER=${BUGCLI_SERVER:="bugs.sourcemage.org"}
+export BUGCLI_DIRECTORY=${BUGCLI_DIRECTORY:="/"}
+

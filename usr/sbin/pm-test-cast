@@ -1,0 +1,94 @@
+#!/bin/bash
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+source /etc/pm-config
+
+echo "pm-test-cast:start" > $PMDIR/state
+
+CAST_LIST=""
+
+#heavily borrowed code, thanks sorcery team ;)
+while  [  -n  "$1"  ];  do
+ if  echo  $1  |  grep  -q  "^-";  then
+   case  $1  in
+      -s)  export UNCAST=$2 ; shift 2 ;;
+       *)  shift 1  ;;
+    esac
+  else
+    CAST_LIST="$CAST_LIST $1"
+    shift
+ fi
+done
+
+#LOCK
+
+#re-generate the excluded list
+#which is anything that is in problems, ignore, or installed
+#winners are okay (otherwise nothing would get done)
+(
+  cut -f1 -d: $PROBLEMS
+  cat $IGNORE $LIST_DIR/installed.lst
+) |sort|uniq > /tmp/excluded.lst
+
+#remove anything excluded from the uncast list, this is mostly an optimization
+#pm-update will put things back on the uncast lists as they come off of
+#the problems list
+#FIXME...
+pm-exclude $UNCAST /tmp/excluded.lst |
+pm-exclude - $WINNER > /tmp/uncast
+mv /tmp/uncast $UNCAST
+
+#this sets currcast.lst to whatever it is we want to cast
+#someday this may be more complex, but not today
+if [[ -z $CAST_LIST ]]; then 
+  #empty, take something from the uncast list, whatever that may be
+  pm-grab $UNCAST $NUM_TEST > /tmp/currcast.lst
+else
+  rm -rf /tmp/currcast.lst 2>/dev/null
+  for each in $CAST_LIST; do echo $each >> /tmp/currcast.lst ; done
+fi
+#remove what we are going to cast from the uncast list
+pm-exclude $UNCAST /tmp/currcast.lst > /tmp/uncast
+
+#order is important here, we want the currcast.lst copied before we copy in
+#the truncated $UNCAST, if we do it the other way, we could lose spells
+#this way we could only recast some spells, which is 'okay'
+
+mv /tmp/currcast.lst $LIST_DIR
+mv /tmp/uncast $UNCAST
+
+#UNLOCK
+
+#sanity...
+echo "making sure color is off in sorcery"
+echo "if its on things will break horribly"
+cat /etc/sorcery/local/config|sed 's/color *"on"/color "off"/' > /tmp/config
+mv /tmp/config /etc/sorcery/local/config
+
+#cast the stupid thing
+cat $PMDIR/lists/currcast.lst|
+xargs pm-autocast /tmp/excluded.lst /tmp/cast.log $DO_DEFAULTS
+#xargs pm-autocast /tmp/excluded.lst /tmp/cast.log $DO_DEFAULTS
+if [[ -e /tmp/pm-autocast-quit ]] ; then 
+  cat $PMDIR/lists/currcast.lst >> $LIST_DIR/skipped.lst
+fi
+
+rm /tmp/excluded.lst
+echo "pm-test-cast:stop" > $PMDIR/state

@@ -1,0 +1,204 @@
+2006-04-19 Seth Alan Woolley
+	* pm-build-md5image: Really fix PRUNES to be properly regex.
+	* pm-config: Correct the regular expression to protect pm-config.
+
+2006-04-17 Seth Alan Woolley
+	* pm-autocast: Fix expect strings to be properly unanchored.
+	* pm-config: Fix PRUNEs to be properly regular expressions.
+
+2005-05-30 Paul Mahon
+	* pm-autocast: Updated some of the strings for the new sorcery
+
+0.3.3
+
+updated/rewrote pm-autocast to be more robust
+added sectioning support, now one can say
+pm-test ham Ham
+(ham being a section, and Ham being the bugzilla component)
+
+lists are now more configurable and are lists that may someday be sharable are
+moved to a shared directory under $PMDIR/lists
+
+various bits and pieces of code cleanup/documentation have appeared
+
+0.3.1-pre4-6
+
+fixed annoying bugs that cropped up in quick untested changes
+
+0.3.1-pre2-3
+
+forgot some stuff, minor changes getting it otd
+
+0.3.1-pre1
+
+added support for requires and optional_requires. Prometheus will look
+at the list of spells sorcery gave it, then after removing spells that
+it thinks there are problems with, picks one at random. If none of the
+spells please prometheus, it will go with the default. Note in the case
+of optional_requires [none] will be choosen if no other spells work
+because there is no [none] spell to upset prometheus.
+
+There is also support for the md5sum menu's. Prometheus notices and
+records what the problem is (missing, ignored or different). Then it does
+whatever the default action is, which is settable through sorcery. It
+notices if the default choice was fatal and records that as well. The
+reports will then also show any md5 problems in a fairly simplistic way.
+
+finally, in response to a bug, the PRUNE variables in the md5sum image
+building code are now open for adjustment through the PRUNE_LOCAL
+variable.
+
+0.3.0
+
+hamish added some quick/dirty code make prometheus work with requires
+
+0.2.7
+typo in pm-restore...grrr
+
+0.2.6
+
+added some more question responses to pm-autocast, and made the timeout
+feature actually work, 30 minutes of zero input will case pm-deadlock
+to be run in an attempt to break the ice, this is close to what a real
+person would do.
+
+triggers are now essentially denied in all cases, im tired of dealing
+with them atm. If it turns out to be essential I'll spend some time
+trying to make them work.
+
+swapped the ordering of stuff in pm-seer, maybe things will be more readable
+
+cast.log is now bzip2'd in the snapshots as they were getting excessively
+large at 9mb for most xfree86 casts...
+
+the now compressed cast.log is being attached to bugs using my snazzy
+bugattach script now found in the bugcli spell.
+
+pm-restore now filters out new/different/deleted files from
+/var/lib/sorcery/{protected,excluded} as well as from yet another
+list known as fprotect.lst. fprotect.lst currently will be a manually
+maintained list of 'notable exceptions' such as /etc/X11/xdm/Xsession. The
+idea is to reduce the number of bugs about random files being left
+behind. Someday in the future I may add code to add and remove things
+from the list after a grace-period if its needed.
+
+The code added to pm-restore was mostly bored from sorcery's filter function
+but modified to work for our purposes.
+
+Note: the filtering occurs _after_ pm-restore restores things, but
+before the reporting is done, so that the system still stays the same,
+but things we dont care about arent reported as bugs.
+
+0.2.5
+changed the way the problems.lst checks for spell updates
+the old method kept the version number and updated field of the broken
+spell, then looked for changes, once a change occured the spell was
+taken off the list.
+
+It occured to me that the UPDATED field is designed for specifying
+when an update _must_ occur, regardless of a version change, well at least
+that is what used to be the case, and rather than redefine it according to my
+goals, and force guru's to change the field whenever they update the spell,
+I've decided to use md5sums instead.
+
+prometheus now executes
+md5=$(tar c $SPELL_DIRECTORY|md5sum|cut -f1 -d' ')
+
+as a new way of detecting spell updates
+
+this is more robust in that even if a developer forgets to change the updated
+field, any changes in the spell will be detected (and assumed a fix for whatever
+our problem is)
+
+the only drawback is that fixes not related to a bug we found in the
+spell will cause the spell to be removed from the problems list, and be
+availible for casting again, leading to duplicate bugs. However given
+that spells are rarely updated except for version bumps and bug-fixes,
+and that prometheus bugs seem to be pretty high priority, this shouldn't
+be a problem.
+
+0.2.4
+pm-setup now adds sorcery's sustained list to the ignore lists
+
+fixed a bug in pm-autocast where cast seems to send an eof after the
+Do you want to cast these spells? [y]
+query, even though the user answers 'y'
+I had to instruct expect to wait for an eof...hopefully things wont
+break because of this
+
+pm-restore now uses the --notriggers option when calling dispel, this
+is to avoid the annoying problems shown in bug 4111
+
+pm-restore also now does snapshot restoration in a safer way
+instead of deleting new files first, it deletes them last, leaving room
+for restoring deleted files and changed files. This caused an obscure bug
+whereby cut (and other things) had been moved from /usr/bin to /bin and
+prometheus was deleting the /bin version before it restored the /usr/bin/
+version, essentially causing it to stop functioning. (sorry demon_lord)
+
+fixed a bug in pm-seer whereby spells with identical versions were
+masking each other off the summary.
+
+0.2.3
+apparently perl doesnt like this following:
+$foo="stuff++";
+m/^$foo/;
+it complains because it sees the ++ as a nested operator, and cant handle it.
+I found out that m/^\Q$foo/; solves our problem, so this does it.
+See bug 4057 for reference.
+
+fixed some other annoyances with pm-seer
+
+
+0.2.2
+
+fixed a bug in pm-update that made it impossible for prometheus to remove
+spells from the updated list.
+
+fixed some stuff in pm-seer, but nothing major
+
+
+0.2.1
+various bug fixes:
+made pm-report-all ask for a report of smaller size which was provoking
+bugs in pm-seer's trimming code
+
+tried to fix pm-seer's trimming code
+
+changed pm-post-cast to grep for 'failure' and 'failed instead of just
+'failure', sometime spells dont cast due to missing source and cast
+reports 'failed' which obviously doesnt match 'failure'
+
+made pm-seer's high level summary try to make a better guess at the
+number of things its talking about on each line.
+"At least 'n' cast(s) failed"
+
+0.2 
+excluded.lst IS NO MORE you need to re-run pm-setup if you were running 0.1
+sorry
+
+there is a more complex exclusion system that now handles most implicit
+casts/dispels well.
+
+pm-autocast uses expect, which answers questions from cast in a sensable
+manner it can also choose defaults or answer some questions randomly.
+
+pm-deadlock was added as a helper to pm-autocast
+
+problems.lst was added, it stored a record of all borked spells and
+during pm-uopdates things are taken off if they are new.
+
+pm-update will sync off of p4
+
+pm-seer was revamped and says more stuff.
+
+pm-config was prettied to do better with defaults being overridden
+
+pm-report-all now has options to email you successes as well as failures
+
+files that end up in /usr/local after cast are noticed and dealt with
+appropriatly
+
+'various bug fixes'
+
+I think thats it...

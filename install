@@ -1,0 +1,4 @@
+cp -v etc/pm-config $1/etc
+cp -v usr/sbin/* $1/usr/sbin/
+mkdir -p $1/usr/share/prometheus 2>/dev/null
+cp usr/share/fprotect.lst $1/usr/share/prometheus

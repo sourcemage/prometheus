@@ -1,0 +1,440 @@
+#!/usr/bin/expect
+##################################################################
+#Copyright (C) 2003 Andrew Stitt astitt@sourcemage.org
+#Copyright (C) 2003 Source Mage GNU/Linux (www.sourcemage.org)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either
+#version 2 of the License, or (at your option) any later
+#version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##################################################################
+#options
+#1 ignore list
+#2 log file
+#3 defaults?
+#... options to cast -c -r
+
+set goahead y
+set defaults yes
+
+#######SUBROUTINES###############
+#log stuff with pm-autocast: prepended
+proc log { str } {
+  send_log "pm-autocast:$str\n"
+}
+
+#send a y or n if defaults is set to 'y' and send a \r otherwise
+proc shrug { } {
+  global defaults
+  if { [string match n* $defaults] } {
+    if { [expr rand()] < 0.5 } {
+      return y
+    } else {
+      return n
+    }
+  } else {
+    return \r
+  }
+}
+
+
+#given a spell name and an ignore file, return 1 if castable
+#0 otherwise
+proc castable {ignorelist spell} {
+  if {[lsearch $ignorelist $spell] == -1} {
+    return 1
+  } else {
+    return 0
+  }
+}
+
+#this looks at the input for the next word, which in the callers
+#context should be a spellname
+proc get_spell {sid} {
+  expect {
+    -i $sid
+    -re "(\[^\n? ]*)" {
+      set spell [string trim $expect_out(1,string) "\r\n\t "]
+      log "found: $spell\n"
+      return $spell
+    }
+  }
+}
+
+#grab a word from the input (presumably a spell)
+#if that spell is uncastable exit
+proc cancast {sid ignorelist spell} {
+  if { [castable $ignorelist $spell] == 0 } {
+    log "killing cast because the spell is uncastable"
+    kill_cast $sid
+  }
+}
+
+proc kill_cast {sid} {
+  log "kill_cast"
+  #send a ctrl-c
+  send -i $sid "\x03"
+  #let everyone know we died prematurely
+  catch { exec touch /tmp/pm-autocast-quit }
+  #and exit
+  exit
+  # nlm
+}
+
+proc fix_deadlock { } {
+  catch {exec ps -A | grep casting | awk {{print $1}} | tail -1 | xargs kill}
+}
+
+#######################EXPECT ROUTINES##################
+#answers all questions for requires
+#FIXME: should notice if we've answered a requires question already
+#and pick the same one again
+proc handle_requires { sid ignorelist requires} {
+  log "handle_requires"
+  if {![string length $requires]} {
+    error "No provider!"
+  }
+  global defaults
+  global requires_lookup
+  set length 0
+  set lst { }
+  log "running handle_requires!!\n"
+  while 1 {
+    expect {
+      -i $sid
+      -re {Continue to use [^yn]*\[[yn]]} {	
+	log "requirement already fulfilled"
+        send -i $sid y
+        return
+      }
+      -re {(.*?)Which one do you want.\s+\[.]} {
+        set buffer $expect_out(1,string)
+        break
+      }
+      timeout kill_cast $sid
+      eof kill_cast $sid
+    }
+  }
+
+  array set char_to_spell ""
+  array set spell_to_char ""
+  set optional 0
+  set optional_idx ""
+  foreach line [split $buffer \n] {
+    if {[catch {llength $line}]} {
+      # oops this line isn't parsable
+      continue
+    }
+    set num [string index [lindex $line 0] 1]
+    set spell [lindex $line 1]
+    if {![string length $num] || ![string length $spell]} {
+      log "empty line on $line"
+      continue
+    }
+    if {[string equal {[none]} $spell]} {
+      set optional 1
+      set optional_idx $num
+    } elseif {[castable $ignorelist $spell]} {
+      set char_to_spell($num) $spell
+      set spell_to_char($spell) $num
+    }
+  }
+
+  if {[llength [array names char_to_spell]] == 0} {
+    if {$optional} {
+      send -i $sid $optional_idx
+    } else {
+      log "ack, none of these are castable!"
+      kill_cast $sid
+    }
+  } else {
+    if {[string match y* $defaults]} {
+      send -i $sid \r
+    } else {
+      # if an answer was already choosen, try that
+      if {[info exists requires_lookup($requires)]} {
+        set prefered_answer $requires_lookup($requires)
+        if {[info exists spell_to_char($prefered_answer]} {
+          set answer $spell_to_char($prefered_answer)
+        }
+      }
+      if {![info exists answer]} {
+        set idx [expr {int(rand()*[llength [array names char_to_spell]])}]
+        set answer [lindex [array names char_to_spell] $idx]
+
+        set requires_lookup($requires) $char_to_spell($answer)
+      }
+      send -i $sid $answer
+    }
+  }
+  expect -i $sid \n { }
+}
+
+
+#this jots down md5 issues and records their bug status (input variable)
+#and using expect, determines if they are fatal or not
+proc md5abort { sid bug spell tarball } {
+  set out [open /tmp/pm-automd5.lst a]
+  puts -nonewline $out "$spell:[string trim $tarball ". \n\r"]:$bug:"
+  expect {
+    -i $sid
+    -gl {Abort? \[y]} {
+      puts $out "fatal"
+      close $out
+      send -i $sid \r
+      kill_cast $sid
+    }
+    -gl {Abort? \[n]} {
+      puts $out "ignored"
+      close $out
+      send -i $sid \r
+    }
+  }
+  close $out
+  error "How did i get here"
+}
+
+#this is supposed to answer all questions from the initial q/a session
+proc do_initial { sid ignorelist } {
+  log "Made it into pm-autocast.do_initial"
+  while { 1 } { expect {
+    -i $sid
+    "is not a spell" {
+      log "oops, oh well"
+    }
+    -re {\n([^\n]*?) preparing environment} {
+      set spell $expect_out(1,string)
+      cancast $sid $ignorelist $spell
+    }
+    -re {\n([^\n]*?) checking dependencies for} {
+      set spell $expect_out(1,string)
+      cancast $sid $ignorelist $spell
+    }
+    -re "Install\[^\n]*script\[^\n]*\\\[?]" {
+      send -i $sid n
+    }
+    -re "Enable \[^\n]*script\[^\n]*\\\[?]" {
+      send -i $sid n
+    }
+    -re {Would you like to [^\n]*? the init and/or xinetd script} {
+      expect {
+        -i $sid
+        -gl {Which one do you want} {
+          # 0 is the "neither"
+          send -i $sid 0
+        }
+      }
+    }
+    -re "\[^\n]*to be the default provider of\[^\n]*\\\[?]" {
+      send -i $sid n
+    }
+    -re "Get \[^\n]* grimoire\?" {
+      send -i $sid n
+      expect -i $sid "\n" { }
+    }
+    -re {requires some (\S+)[^\n]*?\n} {
+      handle_requires $sid $ignorelist $expect_out(1,string)
+    }
+    "Do you want to use " {
+      send -i $sid [shrug]
+      expect -i $sid "\n" { }
+    }
+    -re "(Do you want to cast )|(Cast )" {
+      if { [castable $ignorelist [get_spell $sid]] } {
+        send -i $sid [shrug]
+      } else {
+        send -i $sid n
+      }
+      expect -i $sid "\n" { }
+    }
+    {Configure host.def} {
+      send -i $sid n
+    }
+    -re {[^\n]*\[.*]} { ;#any random question we dont know
+      set question $expect_out(0,string)
+      expect {
+        -i $sid
+        -timeout 2 "\n" {
+          log "$question is not a question"
+        }
+        timeout {
+          send -i $sid [shrug]
+        }
+      }
+    }
+    -gl "cannot initialize curses" {
+      log "oops you gave me a menu"
+    }
+    "CONTINUE casting" { send -i $sid "y" }
+    "you want to dispel" { send -i $sid "n" }
+    -re "Dispel\[^\n]*\?" { send -i $sid "n" }
+    -re "Spells are to be cast" {
+      return confirm
+    }
+    eof {
+      log "premature eof"
+      exit
+    }
+    timeout {
+      send_user "timeout!!! waited too long for something to happen"
+      #lets shoot something hope it fixes everything
+    }
+  }}
+}
+#this is supposed to watch all the output after casting has started and deal with it correctly.
+proc watch_cast {sid} {
+  #if there is no output for a half hour
+  #signal a timeout, ie shoot something
+  #if 60 minutes isnt enough i suppose i can make it configurable
+  set timeout  3600
+  while { 1 } { expect {
+    -i $sid
+    timeout
+    { #something is wrong...
+      send_user "timeout, oh well..."
+      exp_continue
+      #lets shoot something hope it fixes everything
+      #fix_deadlock
+    }
+    -re "Do you wish to add -- options to ./configure\[^\n]*" {
+      send -i $sid "n"
+    }
+    "CONTINUE casting" { send -i $sid "y" }
+    "you want to dispel" { send -i $sid "n" }
+    -re "Dispel.*\?" { send -i $sid "n" }
+    -re {([^:]*): doesn't have an MD5 sum for the uncompressed ([^\n]*)\n} {
+      md5abort $sid "missing" $expect_out(1,string) $expect_out(2,string)
+    }
+    -re {([^:]*): MD5 sum is different for uncompressed ([^\n]*)\n} {
+      log "different md5sum\n"
+      md5abort $sid "different" $expect_out(1,string) $expect_out(2,string)
+    }
+    -re {([^:]*): MD5 sum was purposefully left out for the uncompressed ([^\n]*)\n[^\n]*\n} {
+      md5abort $sid "ignored" $expect_out(1,string) $expect_out(2,string)
+    }
+ 
+    -re "Shall the .* init script be enabled on install" {send -i $sid "n"}
+    "Attempt to fix spells that may have become broken" {send -i $sid "n"}
+    -re {has triggered a .*? on spell} {
+      expect {
+        -i $sid
+        -re {Proceed.\s+\[.]} { send -i $sid "n" }
+      }
+    }
+    -re "Do you want to cast these\[^\n]*\\\[\[yn]]" {
+    #you already asked me this...must be one of those damn triggers
+      send -i $sid "n"
+    }
+    -re ".* to be the default provider of \[^\n]*\\\[\[yn]]" { send -i $sid "n" }
+
+    #all real patterns should go before this
+    -re "\[^\n]*\\\[\[yn]]" {
+      log "read $expect_out(0,string)doing the default\n"
+      send -i $sid "\r"
+    }
+    -re {([^\n]*(\[.*])|(\(.*\))|.*:)} { 
+      #this might be a question or it might not be
+      #so what we do is wait for 60 seconds for something to go
+      #with the hope that _something_ on the next line
+      #will come by, in which case it was a false alarm
+      set question $expect_out(0,string)
+      expect {
+        -i $sid
+        -timeout 20 "\n" {
+          #log "$question is not a question"
+        }
+        timeout {
+          #poke
+          send -i $sid "\n"
+        }
+      }
+    }
+    -gl {Finished processing install requests} {
+      expect {
+        -i $sid
+        eof { return end }
+      }
+    }
+    -gl {Spells that encountered problems} {
+      expect {
+        -i $sid
+        eof { return end }
+      }
+    }
+    -re "\[^\n]*\n" { } ;#matches anything else keeps timeout from triggering
+    eof {
+      log "Premature eof"
+      return end
+      #FIXME uh...
+    }
+  }}
+}
+
+######REAL CODE###########
+
+proc main {argv} {
+  global defaults
+  set argc [ llength $argv ]
+  if { $argc < 3  } {
+    puts "args are not >=3"
+    exit
+  }
+
+  set env(TERM) builtin-dump
+
+  set ignore_file [lindex $argv 0]
+  set fd [open $ignore_file r]
+  set ignorelist [read $fd]
+  close $fd
+  log_file -noappend [lindex $argv 1]
+  set defaults [ lindex $argv 2 ]
+  
+  set spells [lrange $argv 3 end]
+  
+  puts "going to cast -r -c $spells"
+  set cast_pid [spawn cast -r -c $spells]
+  set sid $spawn_id
+  
+  set timeout 180
+  set state initial
+  while 1 {
+    switch -- $state {
+      initial {
+        set state [do_initial $sid $ignorelist ]
+        continue
+      }
+      confirm {
+        expect {
+          -i $sid
+          -re "Do you want to cast these\[^\n]*\\\[\[yn]]" {
+            send -i $sid y
+            set state in_cast
+            continue
+          }
+        }
+      }
+      in_cast {
+        set state [watch_cast $sid]
+        continue
+      }
+      end {
+        exit 0
+      }
+    }
+  }
+}
+
+# exp_internal 1
+puts "starting"
+main $argv
+puys "ending"

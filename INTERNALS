@@ -1,0 +1,194 @@
+If you are reading this you probably want to know how prometheus works.
+
+Well you are in the right place, lets get going.
+
+Overview:
+Its best to think of prometheus in a layered sense.
+
+There are three 'layers', there are two top level scripts, pm-test and
+pm-report-all. These are the primary interface you (the user) will
+use. Next there is a middle level, these consist of scripts that do the
+actual work, and are run by the top level scripts. They are: pm-update,
+pm-pre-cast, pm-test-cast, pm-post-cast, pm-restore, pm-autocast and
+pm-seer. At the bottom level are pm-image-diff, pm-grab, pm-build-md5image
+and pm-exclude. Most of these bottom level scripts are written in perl
+and do list crunching that I wouldnt want to even try in bash.
+
+The languages of choice are bash, perl, and expect. The bottom level
+scripts are written in perl and everything above it is written in bash. If
+you feel any script is better suited to be written in another language,
+go for it, that is partly why i designed prometheus to be modular.
+
+There are also two other pieces to the puzzle: pm-setup, which essentially
+sets up prometheus (so pm-test can run), and pm-config which specifies
+all the configurable bits of prometheus.
+
+Top level:
+
+Prometheus is built around what i call the 'cast-dispel cycle'.
+In a nutshell:
+0. update (optional)
+1. choose what to cast
+2. cast
+3. dispel
+4. repeat
+
+This is the core design, and is the most reasonable and flexable way I
+could come up with. In between 2 and 3 prometheus notices what succeeded
+and what failed, and records it in what I call a snapshot (more on this
+later). After step 3 prometheus restores the system to the state it was
+in before step 1, with a few slight caveats. Then prometheus is ready
+to begin anew at step 0 or 1.
+
+pm-test implements this cast dispel cycle using the various tools from
+the middle level. It records a time that a cycle began at and the
+subsequent scripts use that as a reference point, and the snapshot is
+named after that time, which is kept in $PMDIR/currtime
+
+pm-report-all can be run by pm-test, or not, it depends on values from
+the config file. When it does it makes a 'report' from each of the
+'snapshots' then possibly sends off the report as an email or as a bug
+to bugzilla.
+
+Middle level:
+This is where the magic happens, hopefully you understand the cast-dispel
+cycle, here I will flesh out the details, by listing each of the scripts
+in the order it is run by pm-test.
+
+pm-update:
+this script does a sorcery update and a scribe update. It then notices if
+there are any new spells and adds them to the queue of uncast spells. The
+DO_UPDATE variable in pm-config specifies whether or not it runs, its
+value should be either 'yes' or 'no'.
+
+pm-pre-cast:
+this script clears out any old activity log, and broken source trees
+in /usr/src. The scripts that figure out what installed and did not
+install rely on the activity logs. To simplify this code the activity
+log is truncated before each run. If there is an old one, it gets saved
+into activity.old, however in a running system the activity log should
+actually not exist at this point; except if you happened to have done
+some work in between a cast-dispel cycle *WHICH IS NOT SUPPORTED BTW*
+(unless you run pm-setup first).
+
+pm-test-cast:
+this is the crux of the whole operation. This script chooses what to cast,
+and guess what? casts it. Thats it.
+
+pm-post-cast:
+this is one of the most difficult and complicated scripts, I dont like
+it. What it is reponsible for doing is parsing the activity log and
+figuring out what cast and what failed. It also uses
+/var/state/sorcery/packages for things that are installed. Then for every
+successful cast it copies over the compile log, list of installed files,
+and cached installed files. For failed casts it saves the broken source
+tree into the snapshot along with the compile log and config.log for
+easy access.
+
+pm-restore:
+this is the second most complicated script IMO, next to pm-post-cast. This
+script dispels everything in the success list left by pm-post-cast. Then
+it notices all the things that have changed on the system. Anything that
+was deleted or changed it restores, and anything that is new it
+deletes. All three of these categories are included in the snapshot,
+every related file is saved.
+
+pm-make-report:
+this script is eventually going to be re-written by Duane, for now it
+just makes a report listing the things attempted to be cast, the things
+that worked, the things that didnt and the first thing that broke in
+the activity log.
+
+Bottom level:
+
+pm-exclude:
+this simple perl script does what no unix utility I could find does. It computes the set difference between two files where each line is a member. Basically if you have the lists:
+a
+b
+c
+d
+
+and:
+
+a
+c
+
+Then running pm-exclude between the two will output b d, or the members
+in the first list not in the second list. I wanted to use comm for this,
+but it didnt seem to do it the way i wanted, i wanted to use diff, but
+would take longer to parse its output than to run a script that does
+it itself. If you know of a way to do this that is just as fast by all means
+GO FOR IT!
+
+pm-grab:
+this simple script takes an input list and gives you n random things
+from it where n is a command line option. Its sole user is pm-test-cast.
+
+pm-build-md5image:
+this script does a find across (almost) the entire file tree and computes
+the md5sum of every file it finds, and dumps it to stdout. It is usually
+redirected to a file. It is basically a ripoff from updatedb from the
+slocate package. It ignores files from prometheus, and sorcery and other
+things as best it can, you can look at the source if you really want to
+see what it ignores.
+
+pm-image-diff:
+This takes two images, from pm-build-md5image and dumps into the files
+new.lst different.lst and deleted.lst what files are new, different,
+or deleted. Between the first (old) and second (new) images. The md5sums
+are used to compare files (clever i know).
+
+*NOTE*
+it has been suggested to use the undocumented feature of installwatch,
+which backs up all files that are changed to another directory instead
+of doing thigns this way. I have considered this and while I realize
+that it is faster, I do not feel that it fulfills the needs and goals
+of prometheus for the following reasons:
+
+* prometheus is supposed to be rock solid. Using an undocumented feature
+  is hardly the model of stability.
+* sorcery already uses installwatch and may take advantage of this new
+  undocumented feature in the future, and therefore I would not think that
+  using it myself in anyway would be improve the stability of either,
+  rather it could lead to unusual and confusing problems that im not
+  willing to deal with.
+* the existing system works. Not only does it work, it works really well,
+  I find myself changing minor things on the system and then noticing that
+  prometheus found it and reverted it, everytime. That means that whatever
+  the original image is, prometheus will keep the system looking that way,
+  and this I regard as a good thing. (think reproducable)
+
+Snapshots:
+
+So what are these mythical snapshot things? Well they live in
+$PMDIR/snapshot/<time>
+all the sorcery /etc/sorcery/local settings are saved there
+the packages and depends file from /var/state/sorcery is saved there
+the current prometheus queues and lists are saved there.
+the activity log is there
+the success and failure subdirectory hold all the data pm-post-cast can
+dig up on each spell.
+the directories new, diff.new, diff.old, and deleted hold files that
+pm-image-diff notices, the lists pm-image-diff makes are also kept in
+the snapshot.
+
+Anything else i missed?
+
+pm-setup:
+this makes the directory $PMDIR and some of the necessary things under it,
+and also makes the initial md5sum_image file. It also takes that list
+and cpio's all the files over to $PMDIR/image. This is the 'image'
+to which prometheus will revert to after each cast-dispel cycle.
+
+lists:
+there are a number of lists that prometheus uses. the most
+important one for you is excluded.lst, it is by default everything
+in /var/state/sorcery/packages, but may include other stuff for some
+reason, if you remove things prometheus will think that got installed
+and dispel it, you have been warned. currcast.lst is everything
+that prometheus is currently casting already cast on the last
+cycle. success.lst and failure.lst are those things that succeeded or
+failed since the last run of pm-post-cast. known.lst is every spell that
+prometheus (pm-update) could find in the grimoire EXCEPT for those in
+the excluded.lst. uncast.lst is the current queue of things to cast. It
+gets slowly trickled down to nothing then refilled again.
