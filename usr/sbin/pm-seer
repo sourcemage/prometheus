@@ -58,7 +58,7 @@ reporting options:
   --compile <#lines|full> : reports #line or all of compile log
 
   --badfiles : report files that were deleted, left, or changed
-  --usrlocal : files that somehow ended up in /usr/local
+  --badpaths : files that somehow ended up in /usr/{local,man,info}
 
 END_OF_HELP
 }
@@ -114,7 +114,7 @@ sub seer_build_config(){
   $CONFIG{"new_list"}		="$CONFIG{snapshot_dir}/new.lst";
   $CONFIG{"diff_list"}		="$CONFIG{snapshot_dir}/different.lst";
   $CONFIG{"diff_log"}		="$CONFIG{snapshot_dir}/diff.log";
-  $CONFIG{"usrlocal_list"}	="$CONFIG{snapshot_dir}/usrlocal.lst";
+  $CONFIG{"badpaths_list"}	="$CONFIG{snapshot_dir}/badpaths.lst";
   $CONFIG{"pm_automd5"}		="$CONFIG{snapshot_dir}/pm-automd5.lst";
 }
 
@@ -173,7 +173,7 @@ sub seer_parse{
       %CONFIG=(%CONFIG, coord,1, hls,1, analysis,1, activity,1, lists,1,
 			installed,1, depends,1, "system",1, "local",1,
 			grimoires,1, compile,1, badfiles,1,
-			usrlocal,1,md5,1,title,1);
+			badpaths,1,md5,1,title,1);
     }elsif($ARGV[$i]=~/^--snapshot/){
       if($ARGV[$i+1] ne /--|-/){$CONFIG{snapshot_name}=$ARGV[++$i];}}
     elsif($ARGV[$i]=~/^--output/){
@@ -191,7 +191,8 @@ sub seer_parse{
     elsif($ARGV[$i]=~/^--installed/){%CONFIG=(%CONFIG,"installed",1);}
     elsif($ARGV[$i]=~/^--badfiles/){%CONFIG=(%CONFIG,"badfiles",1);}
     elsif($ARGV[$i]=~/^--md5/){%CONFIG=(%CONFIG,"md5",1);}
-    elsif($ARGV[$i]=~/^--usrlocal/){%CONFIG=(%CONFIG,"usrlocal",1);}
+    elsif($ARGV[$i]=~/^--usrlocal/){%CONFIG=(%CONFIG,"badpaths",1);}
+    elsif($ARGV[$i]=~/^--badpaths/){%CONFIG=(%CONFIG,"badpaths",1);}
     elsif($ARGV[$i]=~/^--depends/){%CONFIG=(%CONFIG,"depends",1);}
     elsif($ARGV[$i]=~/^--bzip2/){%CONFIG=(%CONFIG,"bzip2",1);}
     elsif($ARGV[$i]=~/^--help/){%CONFIG=(%CONFIG,"help",1);}
@@ -245,7 +246,7 @@ sub seer_trim_options{
   }elsif($CONFIG{"system"}){ $CONFIG{"system"}=0;
   }elsif($CONFIG{md5}){ $CONFIG{md5}=0;
   }elsif($CONFIG{badfiles}){ $CONFIG{badfiles}=0;
-  }elsif($CONFIG{usrlocal}){ $CONFIG{usrlocal}=0;
+  }elsif($CONFIG{badpaths}){ $CONFIG{badpaths}=0;
   }elsif($CONFIG{installed}){ $CONFIG{installed}=0;
   }elsif($CONFIG{coord}){ $CONFIG{coord}=0;
   }elsif($CONFIG{lists}){ $CONFIG{lists}=0;
@@ -298,7 +299,7 @@ sub seer_read{
   if($CONFIG{installed} or $CONFIG{analysis}){seer_read_installed();}
   if($CONFIG{badfiles}){ seer_read_badfiles(); }
   if($CONFIG{md5}){ seer_read_md5(); }
-  if($CONFIG{usrlocal}){ seer_read_usrlocal(); }
+  if($CONFIG{badpaths}){ seer_read_badpaths(); }
   return;
 }
 
@@ -323,8 +324,8 @@ print "COMPILE COUNT IS $count\n";
   $LINES{badfiles} = $count; $count = 0;
   seer_write_md5() if($CONFIG{md5});
   $LINES{md5} = $count; $count = 0;
-  seer_write_usrlocal() if($CONFIG{usrlocal});
-  $LINES{usrlocal} = $count; $count = 0;
+  seer_write_badpaths() if($CONFIG{badpaths});
+  $LINES{badpaths} = $count; $count = 0;
   seer_write_system() if($CONFIG{system});
   $LINES{system} = $count; $count = 0;
   seer_write_activity() if($CONFIG{activity});
@@ -403,12 +404,19 @@ sub seer_read_badfiles{
   }
 }
 
-sub seer_read_usrlocal{
-  if( -s $CONFIG{usrlocal_list}){
-    open FILE, "$CONFIG{usrlocal_list}";
-    @usrlocal_files=<FILE>;
-    $ERROR{usrlocal}=@usrlocal_files;
-    close FILE
+sub seer_read_badpaths{
+  if( -s $CONFIG{badpaths_list}){
+    open FILE, "$CONFIG{badpaths_list}";
+    @badpaths_files=<FILE>;
+    close FILE;
+    for $file(@badpaths_files) {
+      $file="$file".".lst";
+      open FILE, "$file";
+      @badpaths_file=<FILE>;
+      close FILE;
+      push(@badpaths_all, @badpaths_file);
+    }
+    $ERROR{badpaths}=@badpaths_all;
   }
 }
 
@@ -456,8 +464,8 @@ sub seer_write_title{
       print FILE "$ERROR{$key} file(s) removed from $spell"; goto end;
     } elsif($key eq "diff_files"){
       print FILE "$ERROR{$key} file(s) changed from $spell"; goto end;
-    } elsif($key eq "usrlocal"){
-      print FILE "$ERROR{$_} file(s) in /usr/local from $spell"; goto end;
+    } elsif($key eq "badpaths"){
+      print FILE "$ERROR{$_} file(s) in wrong places from $spell"; goto end;
     }
   }
   end:
@@ -476,7 +484,7 @@ sub seer_write_hls{
       cprint (FILE, "  At least $ERROR{$_} file(s) left behind after the dispel.\n") if($_ eq "new_files");
       cprint (FILE, "  At least $ERROR{$_} file(s) removed after a dispel when it shouldnt have.\n") if($_ eq "old_files");
       cprint (FILE, "  At least $ERROR{$_} file(s) left changed after the dispel.\n") if($_ eq "diff_files");
-      cprint (FILE, "  At least $ERROR{$_} file(s) placed in /usr/local after a cast.\n") if($_ eq "usrlocal");
+      cprint (FILE, "  At least $ERROR{$_} file(s) placed in wrong paths after a cast.\n") if($_ eq "badpaths");
     } sort keys %ERROR
   }else{
     cprint (FILE, "I found no problems.\n");
@@ -650,10 +658,10 @@ sub seer_write_md5{
   }
 }
 
-sub seer_write_usrlocal{
-  if($CONFIG{usrlocal} and $ERROR{usrlocal}){
-    cprint (FILE,"/USR/LOCAL FILES:\n");
-    cprint (FILE ,"@usrlocal_files");
+sub seer_write_badpaths{
+  if($CONFIG{badpaths} and $ERROR{badpaths}){
+    cprint (FILE,"MISPLACED FILES:\n");
+    cprint (FILE ,"@badpaths_all");
     cprint (FILE,"\n\n");
   }
 }

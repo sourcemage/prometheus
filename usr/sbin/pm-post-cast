@@ -185,28 +185,37 @@ snap_failure(){
   done
 }
 
-check_usrlocal(){
-  echo "checking for /usr/local files"
-  #files that were there before
-  grep "/usr/local" $PMDIR/md5sum_image |awk '{print $2}' > /tmp/usrlocal.ok
-  #files that are there now
-  find /usr/local \( -type p -o -type s \) -prune -o -type d -o -print >/tmp/usrlocal.found
-  #if theres nothing in /usr/local at all, return
-  if [[ ! -s /tmp/usrlocal.found ]]; then return ; fi
+check_bad_paths(){
+  rm -f $SNAPSHOT/badpaths.lst
+  while [[ ! -z $1 ]]; do
+    bad_path=$1
+    pruned_path=${bad_path//\//}
 
-  #otherwise clear off whats already there from our list
-  pm-exclude /tmp/usrlocal.found /tmp/usrlocal.ok > $SNAPSHOT/usrlocal.lst
-  #if theres still something there save it all for later consumption
-  if [[ -s $SNAPSHOT/usrlocal.lst ]]; then
-    mkdir -p $SNAPSHOT/usrlocal 2>/dev/null
-    for each in $(cat $SNAPSHOT/usrlocal.lst );do
-      echo "$each should not be in /usr/local"
-      mkdir -p usrlocal/$(dirname $each) 2>/dev/null
-      cp $each $SNAPSHOT/usrlocal/
-    done
-  fi
-  rm /tmp/usrlocal.*
+    echo "checking for $bad_path files"
+    #files that were there before
+    grep $bad_path $PMDIR/md5sum_image |awk '{print $2}' > /tmp/$pruned_path.ok
+    #files that are there now
+    find $bad_path \( -type p -o -type s \) -prune -o -type d -o -print >/tmp/$pruned_path.found
+    #if theres nothing in $bad_path at all, return
+    if [[ ! -s /tmp/$pruned_path.found ]]; then return ; fi
+
+    #otherwise clear off whats already there from our list
+    pm-exclude /tmp/$pruned_path.found /tmp/$pruned_path.ok > $SNAPSHOT/$pruned_path.lst
+    #if theres still something there save it all for later consumption
+    if [[ -s $SNAPSHOT/$pruned_path.lst ]]; then
+      mkdir -p $SNAPSHOT/$pruned_path 2>/dev/null
+      for each in $(cat $SNAPSHOT/$pruned_path.lst );do
+        echo "$each should not be in $bad_path"
+        mkdir -p $pruned_path/$(dirname $each) 2>/dev/null
+        cp $each $SNAPSHOT/$pruned_path/
+      done
+    fi
+    rm /tmp/$pruned_path.*
+    echo $pruned_path >> $SNAPSHOT/badpaths.lst
+    shift
+  done
 }
+
 ###########################end-subroutines#####################
 ###########################begin real code#####################
 
@@ -263,7 +272,7 @@ source /etc/sorcery/config #oh boy...but dont worry, I only want the variables
 snap_success "$SNAPSHOT"
 snap_failure "$SNAPSHOT"
 
-check_usrlocal $SNAPSHOT
+check_bad_paths /usr/local /usr/man /usr/info
 
 echo "pm-post-cast:stop" > $PMDIR/state
 exit 0
